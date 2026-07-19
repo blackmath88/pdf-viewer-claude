@@ -20,6 +20,7 @@ export class Viewer {
     this.scroll = els.scroll;
     this.holder = els.holder;
     this.canvas = els.canvas;
+    this.textLayerEl = els.textLayer || null;
     this.ctx = this.canvas.getContext('2d', { alpha: false });
     this.hooks = hooks;
 
@@ -30,7 +31,9 @@ export class Viewer {
     this.rotation = 0;         // 0 | 90 | 180 | 270
     this.fitWidth = true;      // when true, scale is derived from viewport width
     this.scale = 1;            // effective scale used for the last render
+    this.TextLayer = null;     // PDF.js TextLayer class (enables text selection)
     this._renderTask = null;
+    this._textLayer = null;
     this._pageCache = new Map();
     this._renderToken = 0;
   }
@@ -38,7 +41,7 @@ export class Viewer {
   get isOpen() { return !!this.pdf; }
 
   /** Load a already-parsed PDF document. */
-  async open(pdf, { name = '', startPage = 1, fitWidth = true, scale = 1 } = {}) {
+  async open(pdf, { name = '', startPage = 1, fitWidth = true, scale = 1, TextLayer = null } = {}) {
     this._destroyDoc();
     this.pdf = pdf;
     this.name = name;
@@ -47,6 +50,7 @@ export class Viewer {
     this.rotation = 0;
     this.fitWidth = fitWidth;
     this.scale = scale;
+    if (TextLayer) this.TextLayer = TextLayer;
     await this.render();
     this._emit();
   }
@@ -81,6 +85,14 @@ export class Viewer {
       try { this._renderTask.cancel(); } catch { /* ignore */ }
       this._renderTask = null;
     }
+    this._cancelTextLayer();
+  }
+
+  _cancelTextLayer() {
+    if (this._textLayer) {
+      try { this._textLayer.cancel(); } catch { /* ignore */ }
+      this._textLayer = null;
+    }
   }
 
   /** Compute the scale to fit the page width into the scroll area. */
@@ -111,6 +123,10 @@ export class Viewer {
     const viewport = page.getViewport({ scale, rotation: this.rotation });
     const dpr = Math.min(window.devicePixelRatio || 1, 3);
 
+    // Drop the previous page's selectable text immediately so stale, wrongly
+    // positioned spans never flash over the new page.
+    this._clearTextLayer();
+
     this.canvas.width = Math.floor(viewport.width * dpr);
     this.canvas.height = Math.floor(viewport.height * dpr);
     this.canvas.style.width = `${Math.floor(viewport.width)}px`;
@@ -136,7 +152,40 @@ export class Viewer {
     if (token === this._renderToken) {
       // Reset scroll to top-left of the new page for a fresh reading position.
       this.scroll.scrollTop = 0;
+      // Overlay a selectable text layer so users can select & copy text.
+      this._renderTextLayer(page, viewport, token);
     }
+  }
+
+  /** Build the transparent, selectable text overlay for the current page. */
+  async _renderTextLayer(page, viewport, token) {
+    const el = this.textLayerEl;
+    if (!el || !this.TextLayer) return;
+
+    this._cancelTextLayer();
+    el.replaceChildren();
+    el.style.setProperty('--scale-factor', String(viewport.scale));
+
+    let layer;
+    try {
+      layer = new this.TextLayer({
+        textContentSource: page.streamTextContent(),
+        container: el,
+        viewport,
+      });
+      this._textLayer = layer;
+      await layer.render();
+    } catch (err) {
+      // Cancellation is expected on rapid page changes; any other failure
+      // just means this page isn't selectable — never fatal to reading.
+      return;
+    }
+    if (token !== this._renderToken) this._clearTextLayer();
+  }
+
+  _clearTextLayer() {
+    this._cancelTextLayer();
+    if (this.textLayerEl) this.textLayerEl.replaceChildren();
   }
 
   _clearCanvas() {
@@ -144,6 +193,7 @@ export class Viewer {
     this.canvas.height = 0;
     this.canvas.style.width = '';
     this.canvas.style.height = '';
+    this._clearTextLayer();
   }
 
   /* ---- navigation ---- */

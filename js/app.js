@@ -34,6 +34,7 @@ const els = {
   canvasScroll: $('canvasScroll'),
   pageHolder: $('pageHolder'),
   pageCanvas: $('pageCanvas'),
+  textLayer: $('textLayer'),
   // controls
   controls: $('controls'),
   prevBtn: $('prevBtn'),
@@ -86,7 +87,7 @@ function toggleTheme() {
 
 /* ---------- viewer ---------- */
 const viewer = new Viewer(
-  { scroll: els.canvasScroll, holder: els.pageHolder, canvas: els.pageCanvas },
+  { scroll: els.canvasScroll, holder: els.pageHolder, canvas: els.pageCanvas, textLayer: els.textLayer },
   { onState: renderState, onError: showError }
 );
 
@@ -161,7 +162,7 @@ async function openFile(file) {
 
     enterReadingMode();
     showLoading(false);
-    await viewer.open(doc, { name: file.name, startPage, fitWidth, scale });
+    await viewer.open(doc, { name: file.name, startPage, fitWidth, scale, TextLayer: pdfjs.TextLayer });
 
     if (startPage > 1) toast(`Resumed at page ${startPage}`, 1600);
   } catch (err) {
@@ -208,6 +209,48 @@ function setupDragDrop() {
     const file = e.dataTransfer.files && e.dataTransfer.files[0];
     if (file) openFile(file);
   });
+}
+
+/* ---------- swipe gestures (touch) ---------- */
+function setupSwipe() {
+  const SWIPE_MIN = 55;   // px of horizontal travel to count as a swipe
+  const RATIO = 1.6;      // horizontal must dominate vertical by this factor
+  const MAX_MS = 700;     // quick flick, not a slow drag/selection
+
+  let sx = 0, sy = 0, st = 0, tracking = false;
+
+  els.canvasScroll.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) { tracking = false; return; } // ignore pinch
+    const t = e.touches[0];
+    sx = t.clientX; sy = t.clientY; st = e.timeStamp; tracking = true;
+  }, { passive: true });
+
+  els.canvasScroll.addEventListener('touchmove', (e) => {
+    if (e.touches.length > 1) tracking = false; // became a pinch
+  }, { passive: true });
+
+  els.canvasScroll.addEventListener('touchend', (e) => {
+    if (!tracking) return;
+    tracking = false;
+    if (!viewer.isOpen) return;
+
+    const t = e.changedTouches[0];
+    const dx = t.clientX - sx;
+    const dy = t.clientY - sy;
+    const dt = e.timeStamp - st;
+
+    if (dt > MAX_MS) return;
+    if (Math.abs(dx) < SWIPE_MIN || Math.abs(dx) < Math.abs(dy) * RATIO) return;
+
+    // Don't turn the page if the user was selecting text…
+    const sel = window.getSelection();
+    if (sel && sel.toString().trim()) return;
+    // …or if the page is zoomed wide enough to pan horizontally.
+    if (els.canvasScroll.scrollWidth > els.canvasScroll.clientWidth + 4) return;
+
+    if (dx < 0) viewer.next();
+    else viewer.prev();
+  }, { passive: true });
 }
 
 /* ---------- fullscreen ---------- */
@@ -327,6 +370,7 @@ function wire() {
   setupDragDrop();
   setupKeyboard();
   setupResize();
+  setupSwipe();
 
   setupPwa({
     installBtn: els.installBtn,

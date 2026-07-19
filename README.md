@@ -24,9 +24,11 @@ Pocket PDF gives the document nearly all of the screen and gets out of the way.
 - Zoom in / out and fit-to-width
 - Rotate clockwise
 - Fullscreen reading mode
+- **Select & copy text** straight from the page (transparent PDF.js text layer)
 
 **Experience**
 - Responsive, mobile-first layout with large touch targets and bottom controls
+- **Swipe left / right to turn pages** on touch devices
 - Keyboard shortcuts for navigation and zoom
 - Visible loading and error states
 - Remembers your theme, zoom preference, and the last page you read — per file
@@ -50,6 +52,10 @@ Pocket PDF gives the document nearly all of the screen and gets out of the way.
 | `F` | Fullscreen |
 | `T` | Toggle theme |
 | `O` | Open a file |
+
+On touch devices you can also **swipe left/right** to move between pages, and
+**select text** to copy it (long-press, then drag). When a page is zoomed wider
+than the screen, horizontal swipes pan instead of turning the page.
 
 ## Privacy
 
