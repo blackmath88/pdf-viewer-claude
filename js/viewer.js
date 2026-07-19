@@ -11,6 +11,10 @@ const MIN_SCALE = 0.25;
 const MAX_SCALE = 6;
 const FIT_PADDING = 32; // horizontal breathing room inside the scroll area (px)
 
+// Mobile GPUs silently degrade (blur) canvases past ~16M pixels. Stay well
+// under that: never allocate a backing store larger than this.
+const MAX_CANVAS_PIXELS = 12_000_000;
+
 export class Viewer {
   /**
    * @param {object} els  { scroll, holder, canvas }
@@ -108,6 +112,11 @@ export class Viewer {
     const token = ++this._renderToken;
     this._cancelRender();
 
+    // A live pinch scales the page holder via CSS transform for 60fps feedback.
+    // Clear it before painting the real bitmap, or the fresh render inherits
+    // that transform and the glyphs come out distorted.
+    this.holder.style.transform = '';
+
     let page;
     try {
       page = await this._getPage(this.pageNum);
@@ -121,26 +130,52 @@ export class Viewer {
     this.scale = scale;
 
     const viewport = page.getViewport({ scale, rotation: this.rotation });
-    const dpr = Math.min(window.devicePixelRatio || 1, 3);
 
     // Drop the previous page's selectable text immediately so stale, wrongly
     // positioned spans never flash over the new page.
     this._clearTextLayer();
 
-    this.canvas.width = Math.floor(viewport.width * dpr);
-    this.canvas.height = Math.floor(viewport.height * dpr);
-    this.canvas.style.width = `${Math.floor(viewport.width)}px`;
-    this.canvas.style.height = `${Math.floor(viewport.height)}px`;
+    // CSS box is the *unscaled* viewport (integer px). The backing store is
+    // this same box multiplied by a device scale, so the bitmap and the CSS
+    // box always share the exact same aspect ratio — glyphs are never stretched.
+    const cssW = Math.floor(viewport.width);
+    const cssH = Math.floor(viewport.height);
 
-    const renderContext = {
-      canvasContext: this.ctx,
-      viewport,
-      transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
-      background: '#ffffff',
-    };
+    // Device scale, capped: at fit/low zoom this is the real DPR; when the full
+    // page would exceed MAX_CANVAS_PIXELS we drop the scale toward 1 (still
+    // supersampled and crisp through ~5×), and only very high zoom goes
+    // sub-CSS — mild, graceful softness instead of the GPU blur/failure.
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    const cssPixels = Math.max(1, cssW * cssH);
+    let deviceScale = dpr;
+    if (cssPixels * deviceScale * deviceScale > MAX_CANVAS_PIXELS) {
+      deviceScale = Math.sqrt(MAX_CANVAS_PIXELS / cssPixels);
+    }
+
+    // Floor (never round up) so the product stays at or under the cap.
+    const bw = Math.max(1, Math.floor(cssW * deviceScale));
+    const bh = Math.max(1, Math.floor(cssH * deviceScale));
+
+    this.canvas.style.width = `${cssW}px`;
+    this.canvas.style.height = `${cssH}px`;
+    this.canvas.width = bw;
+    this.canvas.height = bh;
+
+    // Exact viewport → bitmap mapping (≈ deviceScale on each axis); derived
+    // from the integer bitmap dims so aspect matches the CSS box precisely.
+    const sx = bw / viewport.width;
+    const sy = bh / viewport.height;
+
+    // Testable invariant: never over budget (see acceptance criterion 2).
+    this._lastBitmap = { bw, bh, pixels: bw * bh, deviceScale };
 
     try {
-      this._renderTask = page.render(renderContext);
+      this._renderTask = page.render({
+        canvasContext: this.ctx,
+        viewport,
+        transform: [sx, 0, 0, sy, 0, 0],
+        background: '#ffffff',
+      });
       await this._renderTask.promise;
       this._renderTask = null;
     } catch (err) {

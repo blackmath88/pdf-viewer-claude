@@ -8,7 +8,16 @@
    (scanned images) are counted and flagged — never OCR'd.
    ------------------------------------------------------------ */
 
-/** Group a page's text items into lines using baseline (Y) + x-gaps. */
+/** Group a page's text items into lines using baseline (Y) + x-gaps.
+ *
+ *  A space is inserted between two items on the same baseline only when the
+ *  horizontal gap exceeds 0.25 × font size; contiguous glyph runs (kerning
+ *  gaps of a few percent) concatenate directly. This is the whole fix for
+ *  spurious intra-word spaces like "Mus eum" — a single proportional
+ *  threshold, no dictionaries or language rules. Letter-spaced runs may keep
+ *  their gaps, which is acceptable. `gap = x − (prevX + prevWidth)` and
+ *  `fontSize = hypot(transform[0], transform[1])` (robust to rotation).
+ */
 function groupLines(items) {
   const lines = [];
   let cur = null;
@@ -17,19 +26,21 @@ function groupLines(items) {
   for (const it of items) {
     const s = it.str || '';
     if (s) {
-      const x = it.transform[4];
-      const y = it.transform[5];
-      const size = Math.hypot(it.transform[2], it.transform[3]) || it.height || 0;
+      const t = it.transform;
+      const x = t[4];
+      const y = t[5];
+      // Horizontal font size (basis vector length); handles rotation too.
+      const fontSize = Math.hypot(t[0], t[1]) || it.height || 0;
 
-      if (cur === null || Math.abs(y - cur.y) > Math.max(2, (size || cur.size) * 0.5)) {
-        cur = { text: s, size, y };
+      if (cur === null || Math.abs(y - cur.y) > Math.max(2, (fontSize || cur.size) * 0.5)) {
+        cur = { text: s, size: fontSize, y };
         lines.push(cur);
       } else {
-        const gap = x - lastEndX;
+        const gap = x - lastEndX; // x − (prevX + prevWidth)
         const glued = /\s$/.test(cur.text) || /^\s/.test(s);
-        const sep = glued ? '' : (gap > (size || cur.size) * 0.25 ? ' ' : '');
+        const sep = !glued && gap > 0.25 * (fontSize || cur.size) ? ' ' : '';
         cur.text += sep + s;
-        if (size > cur.size) cur.size = size;
+        if (fontSize > cur.size) cur.size = fontSize;
       }
       lastEndX = x + (it.width || 0);
     }

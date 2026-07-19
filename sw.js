@@ -12,7 +12,7 @@
    read straight from the device.
    ------------------------------------------------------------ */
 
-const VERSION = 'v3';
+const VERSION = 'v4';
 const SHELL_CACHE = `bridgepdf-shell-${VERSION}`;
 const RUNTIME_CACHE = `bridgepdf-runtime-${VERSION}`;
 const SHARE_CACHE = 'bridgepdf-share';       // survives version bumps

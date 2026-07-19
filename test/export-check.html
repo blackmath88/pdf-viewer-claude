@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>bridge-pdf — export spacing check</title>
+  <link rel="icon" href="../icons/icon.svg" type="image/svg+xml" />
+  <style>
+    body { font-family: ui-monospace, Menlo, Consolas, monospace; background: #121017; color: #e8e4dd; margin: 0; padding: 24px; line-height: 1.5; }
+    h1 { font-size: 18px; }
+    #verdict { font-size: 20px; font-weight: 700; padding: 10px 16px; border-radius: 10px; display: inline-block; }
+    .pass { background: #1a7a6d; color: #fff; }
+    .fail { background: #7a1a2a; color: #fff; }
+    pre { background: #1c1723; padding: 14px; border-radius: 10px; overflow-x: auto; white-space: pre-wrap; }
+    li.ok::marker { content: "✓ "; } li.bad::marker { content: "✗ "; }
+    li.bad { color: #ff8fa0; } li.ok { color: #9ad9c9; }
+  </style>
+</head>
+<body>
+  <h1>Text-export spacing regression check</h1>
+  <p id="verdict">running…</p>
+  <ul id="checks"></ul>
+  <h2>Exported text</h2>
+  <pre id="output"></pre>
+
+  <script type="module">
+    import { extractDocument, formatPlainText } from '../js/export.js';
+
+    const PDFJS = '../vendor/pdfjs/pdf.min.mjs';
+    const WORKER = '../vendor/pdfjs/pdf.worker.min.mjs';
+
+    // Words that must appear whole, and the split-artifacts that must not.
+    const mustContain = ['Museum', 'booking', 'reservation', 'keep real spaces between words intact'];
+    const mustNotContain = ['Mus eum', 'bo oking', 'res ervation'];
+
+    function report(output, results) {
+      const pass = results.every((r) => r.ok);
+      const v = document.getElementById('verdict');
+      v.textContent = pass ? 'PASS' : 'FAIL';
+      v.className = pass ? 'pass' : 'fail';
+      const ul = document.getElementById('checks');
+      for (const r of results) {
+        const li = document.createElement('li');
+        li.className = r.ok ? 'ok' : 'bad';
+        li.textContent = r.label;
+        ul.appendChild(li);
+      }
+      document.getElementById('output').textContent = output;
+      // Expose for automated runners.
+      window.__EXPORT_CHECK__ = { pass, results, output };
+    }
+
+    try {
+      const pdfjs = await import(PDFJS);
+      pdfjs.GlobalWorkerOptions.workerSrc = WORKER;
+      const data = await (await fetch('./fixtures/spacing.pdf')).arrayBuffer();
+      const pdf = await pdfjs.getDocument({ data }).promise;
+      const result = await extractDocument(pdf);
+      const output = formatPlainText(result);
+
+      const results = [];
+      for (const w of mustContain) results.push({ ok: output.includes(w), label: `contains "${w}"` });
+      for (const w of mustNotContain) results.push({ ok: !output.includes(w), label: `no split "${w}"` });
+      // Explicit acceptance-criterion assertion:
+      results.push({ ok: (output.split('Mus eum').length - 1) === 0, label: '"Mus eum" count === 0' });
+
+      report(output, results);
+    } catch (err) {
+      const v = document.getElementById('verdict');
+      v.textContent = 'ERROR: ' + err.message;
+      v.className = 'fail';
+      window.__EXPORT_CHECK__ = { pass: false, error: String(err) };
+    }
+  </script>
+</body>
+</html>
