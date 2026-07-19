@@ -7,6 +7,7 @@ import { loadPdfJs } from './pdf-loader.js';
 import { prefs } from './storage.js';
 import { setupPwa } from './pwa.js';
 import * as recents from './recents.js';
+import { extractDocument, formatPlainText, formatMarkdown } from './export.js';
 
 /* ---------- element handles ---------- */
 const $ = (id) => document.getElementById(id);
@@ -17,7 +18,6 @@ const els = {
   // toolbar
   openBtn: $('openBtn'),
   welcomeOpenBtn: $('welcomeOpenBtn'),
-  themeBtn: $('themeBtn'),
   installBtn: $('installBtn'),
   shareBtn: $('shareBtn'),
   docTitleWrap: $('docTitleWrap'),
@@ -28,11 +28,14 @@ const els = {
   shareBackdrop: $('shareBackdrop'),
   sharePdfBtn: $('sharePdfBtn'),
   shareImgBtn: $('shareImgBtn'),
+  copyTextBtn: $('copyTextBtn'),
+  downloadMdBtn: $('downloadMdBtn'),
   shareCancel: $('shareCancel'),
   // stage
   stage: $('stage'),
   welcome: $('welcome'),
   dropzone: $('dropzone'),
+  strip: $('strip'),
   recents: $('recents'),
   recentsList: $('recentsList'),
   recentsClear: $('recentsClear'),
@@ -72,28 +75,6 @@ function toast(message, ms = 2200) {
     els.toast.classList.remove('is-visible');
     setTimeout(() => { els.toast.hidden = true; }, 220);
   }, ms);
-}
-
-/* ---------- theme ---------- */
-function applyTheme(theme) {
-  // theme: 'light' | 'dark' | null(system)
-  const resolved =
-    theme || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-  els.root.setAttribute('data-theme', resolved);
-}
-function initTheme() {
-  applyTheme(prefs.getTheme());
-  // Follow the system if the user hasn't chosen explicitly.
-  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-    if (!prefs.getTheme()) applyTheme(null);
-  });
-}
-function toggleTheme() {
-  const current = els.root.getAttribute('data-theme');
-  const next = current === 'dark' ? 'light' : 'dark';
-  prefs.setTheme(next);
-  applyTheme(next);
-  toast(next === 'dark' ? 'Dark theme' : 'Light theme', 1200);
 }
 
 /* ---------- viewer ---------- */
@@ -469,12 +450,60 @@ async function sharePageImage() {
   }
 }
 
+/* ---------- LLM handoff: export text ---------- */
+async function withExtractedText(run) {
+  const pdf = viewer.pdf;
+  if (!pdf) return;
+  showLoading(true, 'Extracting text… 0%');
+  try {
+    const result = await extractDocument(pdf, (done, total) => {
+      showLoading(true, `Extracting text… ${Math.round((done / total) * 100)}%`);
+    });
+    showLoading(false);
+    await run(result);
+  } catch (err) {
+    console.error(err);
+    showLoading(false);
+    toast('Could not extract text from this PDF');
+  }
+}
+
+function scannedSuffix(n) {
+  return n ? ` · ${n} scanned page${n > 1 ? 's' : ''} skipped` : '';
+}
+
+function copyAllText() {
+  closeShareSheet();
+  return withExtractedText(async (result) => {
+    const text = formatPlainText(result);
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(`Copied ${text.length.toLocaleString()} characters${scannedSuffix(result.emptyCount)}`);
+    } catch {
+      // Clipboard blocked (no permission / lost gesture) — download instead.
+      downloadBlob(new Blob([text], { type: 'text/plain' }), `${baseName(currentName)}.txt`);
+      toast(`Clipboard unavailable — downloaded .txt instead${scannedSuffix(result.emptyCount)}`);
+    }
+  });
+}
+
+function downloadMarkdown() {
+  closeShareSheet();
+  return withExtractedText(async (result) => {
+    const md = formatMarkdown(result);
+    downloadBlob(new Blob([md], { type: 'text/markdown' }), `${baseName(currentName)}.md`);
+    toast(`Downloaded ${baseName(currentName)}.md${scannedSuffix(result.emptyCount)}`);
+  });
+}
+
 function setupShare() {
   els.shareBtn.addEventListener('click', openShareSheet);
   els.shareBackdrop.addEventListener('click', closeShareSheet);
   els.shareCancel.addEventListener('click', closeShareSheet);
   els.sharePdfBtn.addEventListener('click', sharePdf);
   els.shareImgBtn.addEventListener('click', sharePageImage);
+  els.copyTextBtn.addEventListener('click', copyAllText);
+  els.downloadMdBtn.addEventListener('click', downloadMarkdown);
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !els.shareSheet.hidden) closeShareSheet();
   });
@@ -576,8 +605,13 @@ async function refreshRecents() {
   let entries = [];
   try { entries = await recents.list(); } catch { entries = []; }
   els.recentsList.replaceChildren();
-  if (!entries.length) { els.recents.hidden = true; return; }
+  if (!entries.length) {
+    els.recents.hidden = true;
+    els.strip.hidden = true;
+    return;
+  }
   els.recents.hidden = false;
+  els.strip.hidden = false;
 
   for (const e of entries) {
     const li = document.createElement('li');
@@ -705,9 +739,6 @@ function setupKeyboard() {
       case 'F':
         if (!viewer.isOpen) return;
         toggleFullscreen(); break;
-      case 't':
-      case 'T':
-        toggleTheme(); break;
       case 'o':
       case 'O':
         e.preventDefault(); pickFile(); break;
@@ -737,7 +768,6 @@ function wire() {
     e.target.value = ''; // allow re-opening the same file
   });
 
-  els.themeBtn.addEventListener('click', toggleTheme);
   els.errorDismiss.addEventListener('click', dismissError);
 
   els.prevBtn.addEventListener('click', () => viewer.prev());
@@ -766,7 +796,6 @@ function wire() {
 }
 
 /* ---------- boot ---------- */
-initTheme();
 wire();
 setupRecents();
 setupFileHandling();

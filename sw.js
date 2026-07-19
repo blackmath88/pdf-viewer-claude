@@ -12,11 +12,11 @@
    read straight from the device.
    ------------------------------------------------------------ */
 
-const VERSION = 'v2';
-const SHELL_CACHE = `pocketpdf-shell-${VERSION}`;
-const RUNTIME_CACHE = `pocketpdf-runtime-${VERSION}`;
-const SHARE_CACHE = 'pocketpdf-share';      // survives version bumps
-const SHARE_KEY = './__shared-pdf';         // cache key for an incoming shared file
+const VERSION = 'v3';
+const SHELL_CACHE = `bridgepdf-shell-${VERSION}`;
+const RUNTIME_CACHE = `bridgepdf-runtime-${VERSION}`;
+const SHARE_CACHE = 'bridgepdf-share';       // survives version bumps
+const SHARE_KEY = './__shared-pdf';          // cache key for an incoming shared file
 
 // App shell — resolved relative to the service worker's scope.
 const SHELL_ASSETS = [
@@ -29,10 +29,18 @@ const SHELL_ASSETS = [
   './js/storage.js',
   './js/pwa.js',
   './js/recents.js',
+  './js/export.js',
   './manifest.webmanifest',
   './icons/icon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',
+  './icons/icon-maskable-512.png',
+  './icons/apple-touch-icon.png',
+  './fonts/archivo-600.woff2',
+  './fonts/archivo-700.woff2',
+  './fonts/hanken-400.woff2',
+  './fonts/hanken-500.woff2',
+  './fonts/plex-mono-400.woff2',
   './vendor/pdfjs/pdf.min.mjs',
   './vendor/pdfjs/pdf.worker.min.mjs',
 ];

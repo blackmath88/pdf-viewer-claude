@@ -1,18 +1,17 @@
-# Pocket PDF
+# bridge-pdf
 
-A calm, private PDF reader that installs from the browser and turns any device
-into a focused reading surface.
+A private PDF reader from **bridge-work.ai**: **open, look, share, hand off.**
+Installs from the browser and turns any device into a focused reading surface —
+**without uploading the document or creating an account**.
 
-Open a PDF from your device and read it immediately in a clean, responsive
-interface — **without uploading the document or creating an account**.
-
-<p align="center"><img src="icons/icon-512.png" width="120" alt="Pocket PDF icon"></p>
+<p align="center"><img src="icons/icon-512.png" width="120" alt="bridge-pdf icon"></p>
 
 ## Why
 
 Built-in browser PDF viewers are functional but visually noisy, inconsistent
-across devices, and not designed as a focused personal reading experience.
-Pocket PDF gives the document nearly all of the screen and gets out of the way.
+across devices, and not designed as a focused personal experience. bridge-pdf
+gives the document nearly all of the screen, gets out of the way, and makes it
+one tap to share the file or hand its text to an LLM.
 
 ## Features
 
@@ -27,6 +26,9 @@ Pocket PDF gives the document nearly all of the screen and gets out of the way.
 - **Select & copy text** straight from the page (transparent PDF.js text layer)
 - **Share** the original PDF, or the current page as a PNG image (Web Share API,
   with a download fallback where sharing isn't supported)
+- **Hand off to an LLM** — copy the whole document's text (with `--- page N ---`
+  markers) to the clipboard, or download it as Markdown with `##` headings from a
+  font-size heuristic. Scanned pages with no text layer are flagged, not OCR'd.
 
 **Experience**
 - Responsive, mobile-first layout with large touch targets and bottom controls
@@ -36,7 +38,7 @@ Pocket PDF gives the document nearly all of the screen and gets out of the way.
 - Visible loading and error states
 - **Recent documents** shelf — the last 5 PDFs reopen instantly at your last page
 - Remembers your theme, zoom preference, and the last page you read — per file
-- Light and dark themes (follows the system by default)
+- A single, calm dark identity (bridge-work.ai brand)
 - Install button when the browser exposes the PWA install event
 
 **PWA**
@@ -56,7 +58,6 @@ Pocket PDF gives the document nearly all of the screen and gets out of the way.
 | `0` | Fit width |
 | `R` | Rotate clockwise |
 | `F` | Fullscreen |
-| `T` | Toggle theme |
 | `O` | Open a file |
 
 On touch devices you can also **swipe left/right** to move between pages,
@@ -75,9 +76,11 @@ swipes pan instead of turning the page.
   start screen at any time.
 - **Only small preferences** — theme, zoom, and last-page-per-filename — live in
   `localStorage`.
-- **No third-party requests.** PDF.js is vendored locally under
-  [`vendor/pdfjs`](vendor/pdfjs), so the app makes no CDN or external network
-  calls and works fully offline once the shell is cached.
+- **No third-party requests.** PDF.js *and* the brand fonts are vendored locally
+  ([`vendor/pdfjs`](vendor/pdfjs), [`fonts/`](fonts)), so the app makes no CDN or
+  external network calls and works fully offline once the shell is cached.
+- **Text export stays local too.** "Copy all text" and "Download as .md" run
+  entirely in the browser via PDF.js; nothing is sent anywhere.
 
 ## Running locally
 
@@ -105,6 +108,16 @@ The Mozilla PDF.js display build (`pdf.min.mjs` + `pdf.worker.min.mjs`, v4.7.76)
 is vendored under [`vendor/pdfjs`](vendor/pdfjs) and loaded relative to
 [`js/pdf-loader.js`](js/pdf-loader.js). To switch to a CDN build instead, point
 `PDFJS_BASE` there — nothing else needs to change.
+
+## Brand & fonts
+
+bridge-pdf wears the **bridge-work.ai** design system: a single dark palette
+defined once as CSS tokens in `:root` (accent `#2a8fa0` is the only accent
+anywhere), the Signal Mark and strip divider on the empty state, and three
+vendored typefaces — **Archivo** (headings), **Hanken Grotesk** (UI), and
+**IBM Plex Mono** (badge + page indicator), all OFL, latin subsets under
+[`fonts/`](fonts). The reader itself is deliberately near-neutral so documents
+aren't tinted, and there is no site nav or footer — the document owns the screen.
 
 ## Tech
 
