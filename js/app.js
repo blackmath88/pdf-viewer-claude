@@ -6,6 +6,7 @@ import { Viewer } from './viewer.js';
 import { loadPdfJs } from './pdf-loader.js';
 import { prefs } from './storage.js';
 import { setupPwa } from './pwa.js';
+import * as recents from './recents.js';
 
 /* ---------- element handles ---------- */
 const $ = (id) => document.getElementById(id);
@@ -18,13 +19,23 @@ const els = {
   welcomeOpenBtn: $('welcomeOpenBtn'),
   themeBtn: $('themeBtn'),
   installBtn: $('installBtn'),
+  shareBtn: $('shareBtn'),
   docTitleWrap: $('docTitleWrap'),
   docTitle: $('docTitle'),
   fileInput: $('fileInput'),
+  // share sheet
+  shareSheet: $('shareSheet'),
+  shareBackdrop: $('shareBackdrop'),
+  sharePdfBtn: $('sharePdfBtn'),
+  shareImgBtn: $('shareImgBtn'),
+  shareCancel: $('shareCancel'),
   // stage
   stage: $('stage'),
   welcome: $('welcome'),
   dropzone: $('dropzone'),
+  recents: $('recents'),
+  recentsList: $('recentsList'),
+  recentsClear: $('recentsClear'),
   loading: $('loading'),
   loadingText: $('loadingText'),
   errorState: $('errorState'),
@@ -110,6 +121,7 @@ function renderState(s) {
   // Persist reading position + zoom preference
   prefs.setLastPage(s.name, s.page);
   prefs.setZoom(s.fitWidth ? 'fit' : String(viewer.scale));
+  saveProgress(s.page);
 }
 
 /* ---------- UI mode switches ---------- */
@@ -129,11 +141,18 @@ function enterReadingMode() {
   els.canvasScroll.hidden = false;
   els.controls.hidden = false;
   els.docTitleWrap.hidden = false;
+  els.shareBtn.hidden = false;
   els.body.classList.add('has-doc');
 }
 
+/* ---------- current document ---------- */
+// The original File/Blob currently open — kept so we can share it verbatim
+// (never re-serialized from PDF.js).
+let currentFile = null;
+let currentName = 'document.pdf';
+
 /* ---------- open a file ---------- */
-async function openFile(file) {
+async function openFile(file, opts = {}) {
   if (!file) return;
   const looksPdf =
     file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
@@ -158,13 +177,17 @@ async function openFile(file) {
     const zoomPref = prefs.getZoom();
     const fitWidth = zoomPref === 'fit';
     const scale = fitWidth ? 1 : (parseFloat(zoomPref) || 1);
-    const startPage = prefs.getLastPage(file.name);
+    const startPage = opts.startPage != null ? opts.startPage : prefs.getLastPage(file.name);
+
+    currentFile = file;
+    currentName = file.name || 'document.pdf';
 
     enterReadingMode();
     showLoading(false);
-    await viewer.open(doc, { name: file.name, startPage, fitWidth, scale, TextLayer: pdfjs.TextLayer });
+    await viewer.open(doc, { name: currentName, startPage, fitWidth, scale, TextLayer: pdfjs.TextLayer });
 
-    if (startPage > 1) toast(`Resumed at page ${startPage}`, 1600);
+    saveToRecents(file, doc.numPages, viewer.pageNum, opts.recentId);
+    if (viewer.pageNum > 1) toast(`Resumed at page ${viewer.pageNum}`, 1600);
   } catch (err) {
     console.error(err);
     let msg = 'Could not open this PDF.';
@@ -251,6 +274,367 @@ function setupSwipe() {
     if (dx < 0) viewer.next();
     else viewer.prev();
   }, { passive: true });
+}
+
+/* ---------- pinch-to-zoom & double-tap (Pointer Events) ---------- */
+function setupPinch() {
+  const scroll = els.canvasScroll;
+  const holder = els.pageHolder;
+  const pointers = new Map(); // pointerId -> { x, y }
+
+  let pinching = false;
+  let startDist = 1;
+  let startScale = 1;
+  let gesture = 1;
+  let midX = 0, midY = 0;      // gesture midpoint in client coords
+
+  // Double-tap tracking
+  let lastTapTime = 0, lastTapX = 0, lastTapY = 0;
+  let downX = 0, downY = 0, downTime = 0, moved = false;
+
+  const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+  // Re-render at an absolute scale, keeping the given client point anchored.
+  async function applyScaleAnchored(newScale, clientX, clientY) {
+    const rect = scroll.getBoundingClientRect();
+    const vx = clientX - rect.left;
+    const vy = clientY - rect.top;
+    const cx = scroll.scrollLeft + vx;
+    const cy = scroll.scrollTop + vy;
+    const from = viewer.scale;
+    await viewer.setScale(newScale);
+    const f = viewer.scale / from;
+    scroll.scrollLeft = cx * f - vx;
+    scroll.scrollTop = cy * f - vy;
+  }
+
+  function startPinch() {
+    if (!viewer.isOpen) return;
+    const [a, b] = [...pointers.values()];
+    pinching = true;
+    startDist = Math.max(1, distance(a, b));
+    startScale = viewer.scale;
+    gesture = 1;
+    midX = (a.x + b.x) / 2;
+    midY = (a.y + b.y) / 2;
+    const rect = holder.getBoundingClientRect();
+    holder.style.transformOrigin = `${midX - rect.left}px ${midY - rect.top}px`;
+    document.body.classList.add('is-pinching');
+  }
+
+  async function endPinch() {
+    pinching = false;
+    document.body.classList.remove('is-pinching');
+    const g = gesture;
+    holder.style.transform = '';
+    holder.style.transformOrigin = '';
+    if (Math.abs(g - 1) < 0.02) return; // too small to matter
+    await applyScaleAnchored(startScale * g, midX, midY);
+  }
+
+  scroll.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse') return; // pinch/tap are touch/pen only
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 1) {
+      downX = e.clientX; downY = e.clientY; downTime = e.timeStamp; moved = false;
+    } else if (pointers.size === 2) {
+      startPinch();
+    }
+  });
+
+  scroll.addEventListener('pointermove', (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 1) {
+      if (Math.hypot(e.clientX - downX, e.clientY - downY) > 10) moved = true;
+    } else if (pinching && pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      let g = distance(a, b) / startDist;
+      const minG = viewer.minScale / startScale;
+      const maxG = viewer.maxScale / startScale;
+      gesture = Math.min(maxG, Math.max(minG, g));
+      holder.style.transform = `scale(${gesture})`;
+    }
+  });
+
+  function onPointerEnd(e) {
+    if (!pointers.has(e.pointerId)) return;
+    const wasPinching = pinching;
+    pointers.delete(e.pointerId);
+    if (wasPinching && pointers.size < 2) { endPinch(); return; }
+    if (wasPinching) return;
+
+    // Single-pointer tap → double-tap detection
+    if (e.pointerType === 'mouse') return;
+    const quick = e.timeStamp - downTime < 300;
+    if (!quick || moved) return;
+    const now = e.timeStamp;
+    const near = Math.hypot(e.clientX - lastTapX, e.clientY - lastTapY) < 40;
+    if (now - lastTapTime < 300 && near) {
+      lastTapTime = 0;
+      handleDoubleTap(e.clientX, e.clientY);
+    } else {
+      lastTapTime = now; lastTapX = e.clientX; lastTapY = e.clientY;
+    }
+  }
+  scroll.addEventListener('pointerup', onPointerEnd);
+  scroll.addEventListener('pointercancel', (e) => {
+    const wasPinching = pinching;
+    pointers.delete(e.pointerId);
+    if (wasPinching && pointers.size < 2) endPinch();
+  });
+
+  function handleDoubleTap(x, y) {
+    if (!viewer.isOpen) return;
+    window.getSelection()?.removeAllRanges();
+    if (viewer.fitWidth) {
+      applyScaleAnchored(viewer.scale * 2, x, y);   // fit → 2× at the tap point
+    } else {
+      viewer.setFitWidth();                          // zoomed → back to fit width
+    }
+  }
+}
+
+/* ---------- share ---------- */
+function canShareFiles(files) {
+  return !!(navigator.canShare && navigator.canShare({ files }));
+}
+
+/** Fallback when Web Share (with files) is unavailable: download instead. */
+function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+function openShareSheet() {
+  if (!viewer.isOpen) return;
+  els.shareSheet.hidden = false;
+  requestAnimationFrame(() => els.shareSheet.classList.add('is-open'));
+}
+function closeShareSheet() {
+  els.shareSheet.classList.remove('is-open');
+  setTimeout(() => { els.shareSheet.hidden = true; }, 260);
+}
+
+async function sharePdf() {
+  closeShareSheet();
+  if (!currentFile) return;
+  // Ensure a proper File with a name for the share sheet.
+  const file =
+    currentFile instanceof File
+      ? currentFile
+      : new File([currentFile], currentName, { type: 'application/pdf' });
+
+  if (canShareFiles([file])) {
+    try {
+      await navigator.share({ files: [file], title: currentName });
+    } catch (err) {
+      if (err && err.name !== 'AbortError') toast('Couldn’t open the share sheet');
+    }
+  } else {
+    downloadBlob(file, currentName);
+    toast('Sharing isn’t supported here — downloaded instead');
+  }
+}
+
+function baseName(name) {
+  return (name || 'document').replace(/\.pdf$/i, '');
+}
+
+async function sharePageImage() {
+  closeShareSheet();
+  if (!viewer.isOpen) return;
+  const canvas = viewer.canvas;
+  const fileName = `${baseName(currentName)}-p${viewer.pageNum}.png`;
+
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  if (!blob) { toast('Couldn’t capture the page'); return; }
+
+  const imgFile = new File([blob], fileName, { type: 'image/png' });
+  if (canShareFiles([imgFile])) {
+    try {
+      await navigator.share({ files: [imgFile], title: fileName });
+    } catch (err) {
+      if (err && err.name !== 'AbortError') toast('Couldn’t open the share sheet');
+    }
+  } else {
+    downloadBlob(imgFile, fileName);
+    toast('Sharing isn’t supported here — image downloaded');
+  }
+}
+
+function setupShare() {
+  els.shareBtn.addEventListener('click', openShareSheet);
+  els.shareBackdrop.addEventListener('click', closeShareSheet);
+  els.shareCancel.addEventListener('click', closeShareSheet);
+  els.sharePdfBtn.addEventListener('click', sharePdf);
+  els.shareImgBtn.addEventListener('click', sharePageImage);
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !els.shareSheet.hidden) closeShareSheet();
+  });
+}
+
+/* ---------- OS integration: file handlers & share target ---------- */
+const SHARE_CACHE = 'pocketpdf-share';
+const SHARE_KEY = './__shared-pdf';
+
+// PDFs opened via the OS "Open with…" list arrive through the launch queue.
+function setupFileHandling() {
+  if ('launchQueue' in window && 'setConsumer' in window.launchQueue) {
+    window.launchQueue.setConsumer(async (launchParams) => {
+      const handles = launchParams && launchParams.files;
+      if (!handles || !handles.length) return;
+      try {
+        const file = await handles[0].getFile();
+        openFile(file);
+      } catch (err) {
+        console.error(err);
+      }
+    });
+  }
+}
+
+// A PDF shared *into* the app is stashed in a cache by the service worker;
+// pick it up on load, open it, and tidy the URL.
+async function consumeSharedFile() {
+  if (!('caches' in window)) return;
+  try {
+    const cache = await caches.open(SHARE_CACHE);
+    const res = await cache.match(SHARE_KEY);
+    if (res) {
+      const blob = await res.blob();
+      const name = decodeURIComponent(res.headers.get('x-filename') || 'shared.pdf');
+      await cache.delete(SHARE_KEY);
+      openFile(new File([blob], name, { type: blob.type || 'application/pdf' }));
+    }
+  } catch {
+    /* nothing shared, or cache unavailable */
+  }
+  if (location.search) {
+    history.replaceState(null, '', location.pathname + location.hash);
+  }
+}
+
+/* ---------- recents (IndexedDB) ---------- */
+let currentRecentId = null;
+let progressTimer = null;
+
+function recentId(file) {
+  return `${file.name || 'document.pdf'}|${file.size || 0}|${file.lastModified || 0}`;
+}
+
+async function saveToRecents(file, pageCount, lastPage, forcedId) {
+  // Never persist very large files — just open them.
+  if (!file || file.size > recents.MAX_FILE_BYTES) { currentRecentId = null; return; }
+  // Reuse the existing id when reopening a recent so we update, not duplicate.
+  currentRecentId = forcedId || recentId(file);
+  try {
+    await recents.put({
+      id: currentRecentId,
+      name: file.name || 'document.pdf',
+      size: file.size,
+      pageCount,
+      lastPage,
+      blob: file,
+    });
+    refreshRecents();
+  } catch { /* storage unavailable */ }
+}
+
+function saveProgress(page) {
+  if (!currentRecentId) return;
+  clearTimeout(progressTimer);
+  progressTimer = setTimeout(() => recents.updatePage(currentRecentId, page).catch(() => {}), 600);
+}
+
+function relativeTime(ts) {
+  const s = Math.max(0, (Date.now() - ts) / 1000);
+  if (s < 60) return 'just now';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} hr ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d} day${d > 1 ? 's' : ''} ago`;
+  const w = Math.floor(d / 7);
+  if (w < 5) return `${w} wk${w > 1 ? 's' : ''} ago`;
+  return `${Math.floor(d / 30)} mo ago`;
+}
+
+const FILE_ICON =
+  '<svg class="recent__icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z"/><path d="M14 2v6h6"/></svg>';
+const X_ICON =
+  '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+
+async function refreshRecents() {
+  let entries = [];
+  try { entries = await recents.list(); } catch { entries = []; }
+  els.recentsList.replaceChildren();
+  if (!entries.length) { els.recents.hidden = true; return; }
+  els.recents.hidden = false;
+
+  for (const e of entries) {
+    const li = document.createElement('li');
+    li.className = 'recent';
+
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'recent__open';
+    const pages = e.pageCount ? `${e.pageCount} page${e.pageCount > 1 ? 's' : ''}` : '';
+    open.innerHTML =
+      `${FILE_ICON}<span class="recent__meta">` +
+      `<span class="recent__name"></span>` +
+      `<span class="recent__sub"></span></span>`;
+    open.querySelector('.recent__name').textContent = e.name;
+    open.querySelector('.recent__sub').textContent =
+      [pages, relativeTime(e.updatedAt)].filter(Boolean).join(' · ');
+    open.addEventListener('click', () => reopenRecent(e));
+
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'recent__remove';
+    rm.setAttribute('aria-label', `Remove ${e.name}`);
+    rm.title = 'Remove';
+    rm.innerHTML = X_ICON;
+    rm.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      await recents.remove(e.id);
+      refreshRecents();
+    });
+
+    // Long-press also removes (mobile affordance).
+    let lpTimer = null;
+    open.addEventListener('touchstart', () => {
+      lpTimer = setTimeout(async () => { await recents.remove(e.id); refreshRecents(); }, 600);
+    }, { passive: true });
+    const cancelLp = () => clearTimeout(lpTimer);
+    open.addEventListener('touchend', cancelLp);
+    open.addEventListener('touchmove', cancelLp);
+
+    li.append(open, rm);
+    els.recentsList.append(li);
+  }
+}
+
+async function reopenRecent(entry) {
+  const blob = await recents.getBlob(entry.id);
+  if (!blob) { await recents.remove(entry.id); refreshRecents(); toast('That file is no longer available'); return; }
+  const file = new File([blob], entry.name, { type: 'application/pdf' });
+  openFile(file, { startPage: entry.lastPage || 1, recentId: entry.id });
+}
+
+function setupRecents() {
+  els.recentsClear.addEventListener('click', async () => {
+    await recents.clear();
+    refreshRecents();
+  });
+  refreshRecents();
 }
 
 /* ---------- fullscreen ---------- */
@@ -371,6 +755,8 @@ function wire() {
   setupKeyboard();
   setupResize();
   setupSwipe();
+  setupPinch();
+  setupShare();
 
   setupPwa({
     installBtn: els.installBtn,
@@ -382,3 +768,6 @@ function wire() {
 /* ---------- boot ---------- */
 initTheme();
 wire();
+setupRecents();
+setupFileHandling();
+consumeSharedFile();

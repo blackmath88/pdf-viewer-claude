@@ -168,8 +168,11 @@ body {
   position: absolute;
   inset: 0;
   display: grid;
-  place-items: center;
+  gap: 20px;
+  align-content: safe center;
+  justify-items: center;
   padding: 24px;
+  overflow: auto;
 }
 .welcome__card {
   width: min(440px, 100%);
@@ -205,6 +208,94 @@ body {
   color: var(--text-faint);
 }
 
+/* ---- Recents shelf ---- */
+.recents { width: min(440px, 100%); }
+.recents__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 6px 8px;
+}
+.recents__title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-faint);
+}
+.recents__clear {
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+.recents__clear:hover { color: var(--danger); background: var(--accent-soft); }
+.recents__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.recent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 4px;
+  box-shadow: var(--shadow-sm);
+}
+.recent__open {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  text-align: left;
+  padding: 8px;
+  border-radius: 9px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.recent__open:hover { background: var(--accent-soft); }
+.recent__open:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.recent__icon { flex: 0 0 auto; color: var(--accent); }
+.recent__meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.recent__name {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.recent__sub { font-size: 12px; color: var(--text-faint); }
+.recent__remove {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  border-radius: 9px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.recent__remove:hover { background: var(--accent-soft); color: var(--danger); }
+.recent__remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
 /* ---------- Canvas / page ---------- */
 .canvas-scroll {
   position: absolute;
@@ -215,6 +306,8 @@ body {
   justify-content: center;
   align-items: flex-start;
   padding: 20px 16px 28px;
+  /* Allow one/two-finger panning but let us own pinch-zoom (no browser zoom). */
+  touch-action: pan-x pan-y;
 }
 .page-holder {
   position: relative;
@@ -225,6 +318,11 @@ body {
   background: #fff;
   transition: box-shadow .2s var(--ease);
 }
+/* During a pinch we scale the holder via transform for 60fps feedback and
+   suppress text selection so the gesture never starts a selection. */
+body.is-pinching .page-holder { transition: none; }
+body.is-pinching .textLayer { pointer-events: none; }
+body.is-pinching .canvas-scroll { scroll-behavior: auto; }
 #pageCanvas {
   display: block;
   border-radius: 3px;
@@ -419,6 +517,88 @@ body {
   text-align: center;
 }
 .toast.is-visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ---------- Bottom sheet (share) ---------- */
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.sheet__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, .38);
+  opacity: 0;
+  transition: opacity .2s var(--ease);
+}
+.sheet__panel {
+  position: relative;
+  width: min(460px, 100%);
+  background: var(--bg-elev);
+  border-radius: 20px 20px 0 0;
+  padding: 8px 16px calc(20px + env(safe-area-inset-bottom));
+  box-shadow: var(--shadow-md);
+  transform: translateY(100%);
+  transition: transform .26s var(--ease);
+}
+@media (min-width: 520px) {
+  .sheet { align-items: center; }
+  .sheet__panel { border-radius: 20px; margin-bottom: 0; padding-bottom: 20px; }
+}
+.sheet.is-open .sheet__backdrop { opacity: 1; }
+.sheet.is-open .sheet__panel { transform: translateY(0); }
+
+.sheet__handle {
+  width: 40px; height: 4px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  margin: 8px auto 4px;
+}
+.sheet__title {
+  margin: 4px 6px 12px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-soft);
+}
+.sheet__item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 12px;
+  border: none;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color .15s var(--ease), transform .06s var(--ease);
+}
+.sheet__item:hover { background: var(--accent-soft); }
+.sheet__item:active { transform: scale(.99); }
+.sheet__item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sheet__item svg { flex: 0 0 auto; color: var(--accent); }
+.sheet__item-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sheet__item-text strong { font-size: 15px; font-weight: 650; }
+.sheet__item-text small { font-size: 12.5px; color: var(--text-faint); }
+.sheet__cancel {
+  width: 100%;
+  margin-top: 8px;
+  height: 48px;
+  border: none;
+  border-radius: 14px;
+  background: var(--stage);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.sheet__cancel:hover { background: var(--border); }
+.sheet__cancel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ---------- Responsive ---------- */
 @media (min-width: 640px) {

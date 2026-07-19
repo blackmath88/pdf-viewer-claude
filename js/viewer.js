@@ -103,7 +103,7 @@ export class Viewer {
   }
 
   /** Render the current page. Cancels any in-flight render first. */
-  async render() {
+  async render(resetScroll = true) {
     if (!this.pdf) return;
     const token = ++this._renderToken;
     this._cancelRender();
@@ -150,8 +150,9 @@ export class Viewer {
     }
 
     if (token === this._renderToken) {
-      // Reset scroll to top-left of the new page for a fresh reading position.
-      this.scroll.scrollTop = 0;
+      // Reset scroll to top for a fresh reading position on page changes;
+      // zoom/pinch keep their anchor and set the scroll themselves.
+      if (resetScroll) this.scroll.scrollTop = 0;
       // Overlay a selectable text layer so users can select & copy text.
       this._renderTextLayer(page, viewport, token);
     }
@@ -218,6 +219,20 @@ export class Viewer {
   }
   async zoomIn() { return this._zoomBy(ZOOM_STEP); }
   async zoomOut() { return this._zoomBy(1 / ZOOM_STEP); }
+
+  // Scale limits, exposed so gesture code can clamp a live pinch.
+  get minScale() { return MIN_SCALE; }
+  get maxScale() { return MAX_SCALE; }
+
+  /** Set an absolute scale (used by pinch-zoom and double-tap). Preserves
+   *  scroll so the caller can anchor to the gesture midpoint. */
+  async setScale(scale) {
+    if (!this.pdf) return;
+    this.fitWidth = false;
+    this.scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale));
+    await this.render(false);
+    this._emit();
+  }
 
   async _zoomBy(factor) {
     if (!this.pdf) return;

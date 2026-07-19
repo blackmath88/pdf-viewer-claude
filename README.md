@@ -25,12 +25,16 @@ Pocket PDF gives the document nearly all of the screen and gets out of the way.
 - Rotate clockwise
 - Fullscreen reading mode
 - **Select & copy text** straight from the page (transparent PDF.js text layer)
+- **Share** the original PDF, or the current page as a PNG image (Web Share API,
+  with a download fallback where sharing isn't supported)
 
 **Experience**
 - Responsive, mobile-first layout with large touch targets and bottom controls
 - **Swipe left / right to turn pages** on touch devices
+- **Pinch to zoom**, and **double-tap** to toggle between fit-width and 2×
 - Keyboard shortcuts for navigation and zoom
 - Visible loading and error states
+- **Recent documents** shelf — the last 5 PDFs reopen instantly at your last page
 - Remembers your theme, zoom preference, and the last page you read — per file
 - Light and dark themes (follows the system by default)
 - Install button when the browser exposes the PWA install event
@@ -38,6 +42,8 @@ Pocket PDF gives the document nearly all of the screen and gets out of the way.
 **PWA**
 - Web app manifest, standalone display mode, maskable icons
 - Service worker caches the app shell for offline reopening after the first load
+- **Opens PDFs from the OS "Open with…" list** and **receives PDFs shared from
+  other apps** (file handlers + share target; Chromium-based browsers)
 
 ## Keyboard shortcuts
 
@@ -53,16 +59,22 @@ Pocket PDF gives the document nearly all of the screen and gets out of the way.
 | `T` | Toggle theme |
 | `O` | Open a file |
 
-On touch devices you can also **swipe left/right** to move between pages, and
-**select text** to copy it (long-press, then drag). When a page is zoomed wider
-than the screen, horizontal swipes pan instead of turning the page.
+On touch devices you can also **swipe left/right** to move between pages,
+**pinch to zoom**, **double-tap** to toggle zoom, and **select text** to copy it
+(long-press, then drag). When a page is zoomed wider than the screen, horizontal
+swipes pan instead of turning the page.
 
 ## Privacy
 
-- **No upload, no backend.** Selected PDFs are read directly in the browser.
-- **Only preferences are stored** — theme, zoom, and last-page-per-filename live
-  in `localStorage`. The document itself is never persisted, so you'll choose it
-  again after a reload.
+- **No upload, no backend.** Selected PDFs are read directly in the browser and
+  are never transmitted by application code.
+- **Recent documents are stored on your device.** The last 5 PDFs you open are
+  kept in the browser's **IndexedDB** (the file plus a little metadata) so they
+  can reopen instantly and offline. They are never uploaded, files larger than
+  50 MB are not stored, and you can remove any entry or **Clear all** from the
+  start screen at any time.
+- **Only small preferences** — theme, zoom, and last-page-per-filename — live in
+  `localStorage`.
 - **No third-party requests.** PDF.js is vendored locally under
   [`vendor/pdfjs`](vendor/pdfjs), so the app makes no CDN or external network
   calls and works fully offline once the shell is cached.
@@ -97,10 +109,11 @@ is vendored under [`vendor/pdfjs`](vendor/pdfjs) and loaded relative to
 ## Tech
 
 Vanilla HTML, CSS, and JavaScript modules · self-hosted Mozilla PDF.js display
-layer · no backend · in-memory document state plus `localStorage` preferences.
+layer · no backend · in-memory document state · `localStorage` preferences ·
+`IndexedDB` for the on-device recents shelf.
 
-## Non-goals (v0.1)
+## Non-goals
 
-Editing, annotations, text search, OCR, cloud storage or sync, accounts,
-sharing, and signatures are intentionally out of scope — this is a focused
-reader, not a PDF suite.
+Editing, annotations/highlights, full-text search, OCR, cloud storage or sync,
+accounts, and digital signatures are intentionally out of scope — this is a
+focused "open, look, share" reader, not a PDF suite.
